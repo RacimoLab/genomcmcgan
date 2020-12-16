@@ -1,5 +1,7 @@
 import copy
-import concurrent.futures
+import functools
+import multiprocessing as mp
+import resource
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -10,11 +12,10 @@ from symmetric import Symmetric
 from training_utils import DMonitor, DMonitor2, ConfusionMatrix
 
 
-def _discriminator_build(args):
+def _discriminator_build(model_filename, model, in_shape):
     import tensorflow as tf
     import tensorflow_addons as tfa
     from tensorflow import keras
-    model_filename, model, in_shape = args
 
     """Build different Convnet models with permutation variance property"""
 
@@ -169,10 +170,9 @@ def _discriminator_load(model_filename):
     )
 
 
-def _discriminator_fit(args):
+def _discriminator_fit(model_filename, xtrain, xval, ytrain, yval, epochs):
     import tensorflow as tf
     from tensorflow import keras
-    model_filename, xtrain, xval, ytrain, yval, epochs = args
     cnn = _discriminator_load(model_filename)
 
     # Prepare the optimizer and loss function
@@ -198,31 +198,46 @@ def _discriminator_fit(args):
     cnn.save(model_filename)
 
 
-def _discriminator_predict(args):
-    model_filename, inputs = args
+def _discriminator_predictor(model_filename, q_in, q_out):
     cnn = _discriminator_load(model_filename)
-    return cnn.predict(inputs)
+    i = 0
+    while True:
+        inputs = q_in.get()
+        pred = cnn.predict(inputs)
+        q_out.put(pred)
 
+        i += 1
+        maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        if maxrss > 2e9 / 1024:
+            print(f"Predictor {i} has RSS={maxrss} kb, killing")
+            break
 
 class Discriminator:
     def __init__(self, model_filename):
         self.model_filename = model_filename
+        self._p = None
 
     def build(self, model, in_shape):
-        with concurrent.futures.ProcessPoolExecutor(max_workers=1) as ex:
-            next(ex.map(_discriminator_build, [(self.model_filename, model, in_shape)]))
+        with mp.Pool(1) as p:
+            p.apply(_discriminator_build, (self.model_filename, model, in_shape))
 
     def fit(self, xtrain, xval, ytrain, yval, epochs):
         args = (self.model_filename, xtrain, xval, ytrain, yval, epochs)
-        with concurrent.futures.ProcessPoolExecutor(max_workers=1) as ex:
-            next(ex.map(_discriminator_fit, [args]))
+        with mp.Pool(1) as p:
+            p.apply(_discriminator_fit, args)
 
     def predict(self, inputs):
-        with concurrent.futures.ProcessPoolExecutor(max_workers=1) as ex:
-            preds = next(
-                ex.map(_discriminator_predict, [(self.model_filename, inputs)])
+        if self._p is None or not self._p.is_alive():
+            self._q_in = mp.Queue()
+            self._q_out = mp.Queue()
+            self._p = mp.Process(
+                target=_discriminator_predictor,
+                args=(self.model_filename, self._q_in, self._q_out)
             )
-            #print("here!")
+            self._p.start()
+        self._q_in.put(inputs)
+        preds = self._q_out.get()
+        #print("here!")
         return preds
 
 
@@ -248,7 +263,8 @@ class MCMCGAN:
 
     # Where `D(x)` is the average discriminator output from n independent
     # simulations (which are simulated with parameters `x`).
-    def log_prob(self, x):
+    @functools.lru_cache(maxsize=4096)
+    def _log_prob(self, x):
 
         proposals = copy.deepcopy(self.genob.params)
         i = 0
@@ -265,6 +281,9 @@ class MCMCGAN:
         score = self.D(proposals)
         #print(score)
         return np.log(score)
+
+    def log_prob(self, x):
+        return self._log_prob(tuple(x))
 
     def dlog_prob(self, x):
         eps = x * np.sqrt(np.finfo(float).eps)
