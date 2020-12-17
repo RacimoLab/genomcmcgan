@@ -333,6 +333,7 @@ class MCMCGAN:
         self.steps_between_results = steps_between_results
         self.samples = None
         print(self.step_sizes)
+        model_ndim = len(initial_guess)
 
         if self.kernel_name not in ["hmc", "nuts"]:
             raise NameError("kernel value must be either hmc or nuts")
@@ -340,7 +341,7 @@ class MCMCGAN:
         elif self.kernel_name == "hmc":
             self.mcmc_kernel = lmc.HamiltonianMC(
                 logp_dlogp_func=self.logp_dlogp,
-                model_ndim=1,
+                model_ndim=model_ndim,
                 target_accept=0.75,
                 adapt_step_size=True,
             )
@@ -349,7 +350,7 @@ class MCMCGAN:
         elif self.kernel_name == "nuts":
             self.mcmc_kernel = lmc.NUTS(
                 logp_dlogp_func=self.logp_dlogp,
-                model_ndim=1,
+                model_ndim=model_ndim,
                 target_accept=0.75,
                 adapt_step_size=True,
             )
