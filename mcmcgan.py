@@ -201,27 +201,35 @@ def _discriminator_fit(model_filename, xtrain, xval, ytrain, yval, epochs):
 def _discriminator_predictor(model_filename, q_in, q_out):
     cnn = _discriminator_load(model_filename)
     i = 0
-    while True:
+    done = False
+    while not done:
         inputs = q_in.get()
-        pred = cnn.predict(inputs)
-        q_out.put(pred)
+        if inputs is None:
+            done = True
+            break
 
+        pred = cnn.predict(inputs)
         i += 1
         maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        if maxrss > 2e9 / 1024:
+        if maxrss > 8e9 / 1024:
             print(f"Predictor {i} has RSS={maxrss} kb, killing")
-            break
+            done = True
+
+        q_out.put((pred, done))
 
 class Discriminator:
     def __init__(self, model_filename):
         self.model_filename = model_filename
         self._p = None
+        self._q_in = None
+        self._q_out = None
 
     def build(self, model, in_shape):
         with mp.Pool(1) as p:
             p.apply(_discriminator_build, (self.model_filename, model, in_shape))
 
     def fit(self, xtrain, xval, ytrain, yval, epochs):
+        self._terminate_predictor(True)
         args = (self.model_filename, xtrain, xval, ytrain, yval, epochs)
         with mp.Pool(1) as p:
             p.apply(_discriminator_fit, args)
@@ -236,9 +244,25 @@ class Discriminator:
             )
             self._p.start()
         self._q_in.put(inputs)
-        preds = self._q_out.get()
-        #print("here!")
+        preds, done = self._q_out.get()
+        if done:
+            self._terminate_predictor(False)
         return preds
+
+    def _terminate_predictor(self, send_exit_signal):
+        if self._p is None or not self._p.is_alive():
+            return
+        if send_exit_signal:
+            # signal predictor to quit
+            self._q_in.put(None)
+        self._p.join(2)
+        if self._p.is_alive():
+            # shouldn't happen
+            print("terminating predictor")
+            self._p.terminate()
+        self._p = None
+        self._q_in = None
+        self._q_out = None
 
 
 class MCMCGAN:
