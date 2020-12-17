@@ -90,32 +90,37 @@ def run_genomcmcgan(
         start_t = time.time()
 
         stats = mcmcgan.run_chain()
+        print(mcmcgan.samples.shape)
 
         # Draw traceplot and histogram of collected samples
         mcmcgan.traceplot_samples(inferable_params, it)
         mcmcgan.hist_samples(inferable_params, it)
-        mcmcgan.jointplot(it)
+        if mcmcgan.samples.shape[2] == 2:
+            mcmcgan.jointplot(it)
 
         for i, p in enumerate(inferable_params):
             p.proposals = mcmcgan.samples[:, :, i]
 
-        means = np.mean(mcmcgan.samples, axis=2)
-        stds = np.std(mcmcgan.samples, axis=2)
+        means = np.mean(mcmcgan.samples, axis=1)
+        print(means)
+        stds = np.std(mcmcgan.samples, axis=1)
+        print(stds)
         for j, p in enumerate(inferable_params):
             print(f"{p.name} samples with mean {means[j]} and std {stds[j]}")
-        initial_guesses = means
-        step_sizes = stds
+        initial_guesses = np.array(means)
+        step_sizes = np.array(stds)
         # mcmcgan.step_sizes = tf.constant(np.sqrt(stds))
         mcmcgan.setup_mcmc(
             num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 1
+        )
+        
+        xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(
+            num_mcmc_samples, proposals=True
         )
 
         mcmcgan.discriminator.fit(xtrain, xval, ytrain, yval, epochs)
 
         it += 1
-        if training.history["accuracy"][-1] < 0.55:
-            print("convergence")
-            convergence = True
 
         t = time.time() - start_t
         print(f"A single iteration of the MCMC-GAN took {t} seconds")

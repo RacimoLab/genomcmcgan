@@ -11,7 +11,6 @@ from scipy import optimize
 from symmetric import Symmetric
 from training_utils import DMonitor, DMonitor2, ConfusionMatrix
 
-
 def _discriminator_build(model_filename, model, in_shape):
     import tensorflow as tf
     import tensorflow_addons as tfa
@@ -237,7 +236,6 @@ class Discriminator:
             self._p.start()
         self._q_in.put(inputs)
         preds = self._q_out.get()
-        #print("here!")
         return preds
 
 
@@ -279,7 +277,7 @@ class MCMCGAN:
                 i += 1
 
         score = self.D(proposals)
-        #print(score)
+        print(score)
         return np.log(score)
 
     def log_prob(self, x):
@@ -308,7 +306,6 @@ class MCMCGAN:
         self.step_sizes = step_sizes
         self.steps_between_results = steps_between_results
         self.samples = None
-        print(self.step_sizes)
 
         if self.kernel_name not in ["hmc", "nuts"]:
             raise NameError("kernel value must be either hmc or nuts")
@@ -317,7 +314,7 @@ class MCMCGAN:
             self.mcmc_kernel = lmc.HamiltonianMC(
                 logp_dlogp_func=self.logp_dlogp,
                 model_ndim=1,
-                target_accept=0.75,
+                target_accept=0.1,
                 adapt_step_size=True,
             )
 
@@ -326,7 +323,7 @@ class MCMCGAN:
             self.mcmc_kernel = lmc.NUTS(
                 logp_dlogp_func=self.logp_dlogp,
                 model_ndim=1,
-                target_accept=0.75,
+                target_accept=0.1,
                 adapt_step_size=True,
             )
 
@@ -392,8 +389,7 @@ class MCMCGAN:
             plt.xlabel("Accepted samples")
             plt.ylabel("Values")
             plt.title(
-                f"Trace plot of {self.kernel_name} samples for {p.name}"
-                f" at {it}. Acc. rate: {self.acceptance:.3f}"
+                f"Trace plot of {self.kernel_name} samples for {p.name} at {it}"
             )
             plt.savefig(
                 f"./results/mcmcgan_{self.kernel_name}_traceplot_it{it}"
