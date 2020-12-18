@@ -20,6 +20,14 @@ import numpy as np
 from mcmcgan import MCMCGAN, Discriminator
 from genobuilder import Genobuilder
 
+gpus = tf.config.experimental.list_physical_devices("GPU")
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except RuntimeError as e:
+        print(e)
+
 
 def run_genomcmcgan(
     genobuilder,
@@ -110,7 +118,7 @@ def run_genomcmcgan(
         mcmcgan.setup_mcmc(
             num_mcmc_samples, num_mcmc_burnin, initial_guesses, step_sizes, 1
         )
-        
+
         xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(
             num_mcmc_samples, proposals=True
         )
