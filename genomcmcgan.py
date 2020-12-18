@@ -62,10 +62,7 @@ def run_genomcmcgan(
         mcmcgan.discriminator.build(
             model, in_shape=(genob.num_samples, genob.fixed_dim, 1)
         )
-
-    #mcmcgan.discriminator.run_eagerly = True
-    #tf.config.run_functions_eagerly(True)
-    mcmcgan.discriminator.fit(xtrain, xval, ytrain, yval, epochs)
+        mcmcgan.discriminator.fit(xtrain, xval, ytrain, yval, epochs)
 
     # Initial guess must always be a float, otherwise with an int there are errors
     inferable_params = []
