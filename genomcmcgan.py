@@ -39,7 +39,7 @@ def run_genomcmcgan(
             xtrain, ytrain, xval, yval = pickle.load(obj)
     else:
         xtrain, xval, ytrain, yval = genob.generate_data(num_reps=1000)
-        
+
     # Initialize the MCMCGAN object and the Discriminator
     mcmcgan = MCMCGAN(genob, kernel_name, seed)
     mcmcgan.discriminator = Discriminator()
@@ -72,10 +72,9 @@ def run_genomcmcgan(
         if p.inferable:
             inferable_params.append(p)
 
-    # Obtain initial chain states and initial step sizes, and set up the MCMC
-    inits = [p.initial_guess for p in inferable_params]
-    step_sizes = [(p.initial_guess * 0.1) for p in inferable_params]
-    mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 0)
+    inits = [1.0 for p in inferable_params]
+    step_sizes = [0.1 for p in inferable_params]
+    mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 1)
 
     max_num_iters = 5
     convergence = False
@@ -109,9 +108,16 @@ def run_genomcmcgan(
         stds = np.std(mcmcgan.samples, axis=0)
         for j, p in enumerate(inferable_params):
             print(f"{p.name} samples with mean {means[j]} and std {stds[j]}")
-        inits = means
-        step_sizes = stds
-        mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 0)
+        inits = np.fromiter(
+            map(lambda x, bij: bij.inverse(x), means, mcmcgan.bijectors),
+            dtype=np.float32,
+        )
+        step_sizes = np.fromiter(
+            map(lambda x, bij: bij.inverse(x), stds, mcmcgan.bijectors),
+            dtype=np.float32,
+        )
+        # mcmcgan.step_sizes = tf.constant(np.sqrt(stds))
+        mcmcgan.setup_mcmc(num_mcmc_samples, num_mcmc_burnin, inits, step_sizes, 1)
 
         # Generate new batches of real data and updated simulated data
         xtrain, xval, ytrain, yval = mcmcgan.genob.generate_data(

@@ -43,12 +43,11 @@ class MCMCGAN:
         proposals = copy.deepcopy(self.genob.params)
         i = 0
         x = x.numpy()
+        print(x)
         for p in proposals:
             if proposals[p].inferable:
-                if not (proposals[p].bounds[0] < x[i] < proposals[p].bounds[1]):
-                    # We reject these parameter values by returning probability 0.
-                    return -np.inf
-                proposals[p].val = x[i]
+                print(self.bijectors[i].forward(x[i]))
+                proposals[p].val = self.bijectors[i].forward(x[i])
                 i += 1
 
         score = tf.convert_to_tensor(self.D(proposals), tf.float32)
@@ -56,6 +55,18 @@ class MCMCGAN:
 
     def unnormalized_log_prob(self, x):
         return tf.py_function(self._unnormalized_log_prob, inp=[x], Tout=tf.float32)
+
+    def add_bijectors(self):
+
+        bijectors = []
+        tfb = tfp.bijectors
+        for p in self.genob.params.values():
+            if p.inferable:
+                shift = (p.bounds[1] + p.bounds[0]) * 0.5
+                scale = (p.bounds[1] - p.bounds[0]) * 0.1
+                bijectors.append(tfb.Shift(shift)(tfb.Scale(scale)))
+
+        return bijectors
 
     def setup_mcmc(
         self,
@@ -72,6 +83,7 @@ class MCMCGAN:
         self.inits = tf.constant(inits, tf.float32)
         self.step_sizes = tf.constant(step_sizes, tf.float32)
         self.thinning = thinning
+        self.bijectors = None
         self.samples = None
         self.stats = None
 
@@ -85,6 +97,8 @@ class MCMCGAN:
                 num_leapfrog_steps=10,
                 step_size=self.step_sizes,
             )
+
+            self.bijectors = self.add_bijectors()
 
             # Step size adaptation to target_acc_prob during the burn-in stage
             self.mcmc_kernel = tfp.mcmc.SimpleStepSizeAdaptation(
@@ -169,8 +183,14 @@ class MCMCGAN:
         pbar.bar.close()
         print("sampling finished")
 
-        # Collect the samples and stats. Download as a pickle file
-        self.samples = samples.numpy()
+        samples = samples.numpy()
+        self.samples = np.empty(samples.shape)
+        for i, sam in enumerate(samples):
+            self.samples[i, :] = np.fromiter(
+                map(lambda x, bij: bij.forward(x), sam, self.bijectors),
+                dtype=np.float32,
+            )
+
         self.stats = [s.numpy() for s in stats]
         pack = [self.samples, self.stats]
         with open(f"./results/output_it{self.iter}.pkl", "wb") as obj:
